@@ -1,0 +1,19 @@
+version: '3.9'
+
+services:
+  mockiq:
+    build: .
+    container_name: mockiq-streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=sqlite:///./data/mockiq.db
+      - CHROMA_PATH=/app/data/chroma_db
+    volumes:
+      - mockiq-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  mockiq-data:

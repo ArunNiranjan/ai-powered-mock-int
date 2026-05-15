@@ -1,0 +1,40 @@
+#Web framework
+streamlit>=1.34.0
+
+# LLM OpenAI GPT-40+ Whisper
+# openai>=1.35.7
+google-genai>=0.8.0
+
+#Vector database
+chromadb>=0.5.3
+
+#PDF parsing
+pypdf>=4.2.0
+
+#Database (SQLAlchemy, no Flask dependency)
+sqlalchemy>=2.0.30
+
+#Authentication
+werkzeug>=3.0.3
+
+# Computer vision & face analysis
+opencv-python-headless>=4.10.0.84
+mediapipe>=0.10.14
+scipy>=1.13.1
+numpy>=1.26.4
+Pillow>=10.3.0
+
+#Emotion detection (optional install separately if needed)
+#deepface>=0.0.93
+#tensorflow>=2.16.1# required by deepface
+
+# Real-time webcam via WebRTC (optional but recommended)
+#streamlit-webrtc>=0.47.6
+# av>=12.0.0     #PyAV required by streamlit-webrtc
+
+# Environment variables
+python-dotenv>=1.0.1
+
+#Web scraping (not used but kept for parity)
+beautifulsoup4>=4.12.3
+requests>=2.32.3
