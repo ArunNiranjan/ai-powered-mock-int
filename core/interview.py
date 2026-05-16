@@ -1,7 +1,7 @@
 """
 core/interview.py
 Question generation, per-answer feedback, session save/load, overall summary,
-and audio transcription (OpenAI Whisper) 🎙️ all using GPT-4o.
+and audio transcription 🎙️ all using Google Gemini.
 """
 
 import json
@@ -10,7 +10,8 @@ import datetime
 import streamlit as st
 
 from .database import InterviewSession, get_db
-from .resume import get_openai_client, get_resume_context
+from google.genai import types as genai_types
+from .resume import get_gemini_client, get_resume_context
 
 
 # -- Question generation --
@@ -23,8 +24,8 @@ def generate_questions(
     q_type: str,
     job_desc: str,
 ) -> dict:
-    """Generate 10 interview questions via GPT-4o + optional RAG over resume."""
-    client = get_openai_client()
+    """Generate 10 interview questions via Gemini + optional RAG over resume."""
+    client = get_gemini_client()
     resume_context = get_resume_context(user_id, job_role, q_type)
     resume_section = (
         f"- Candidate Resume Highlights: \n{resume_context}" if resume_context else ""
@@ -48,14 +49,16 @@ JSON schema (exactly 10 items):
 {{"questions": [{{"id":1, "question":"..."}}, {{"id":2, "question":"..."}}, ..., {{"id":10, "question":"..."}}]}}"""
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.7,
-            max_tokens=2000,
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.7,
+                max_output_tokens=2000,
+            ),
         )
-        result = json.loads(response.choices[0].message.content)
+        result = json.loads(response.text)
         questions = result.get("questions", [])
         
         with get_db() as db:
@@ -86,7 +89,7 @@ def get_feedback(
     q_type: str,
     engagement_pct: float,
 ) -> dict:
-    """Evaluate a single answer with GPT-4o and return structured feedback."""
+    """Evaluate a single answer with Gemini and return structured feedback."""
     if not answer or len(answer.strip()) < 5:
         return {
             "score": 0,
@@ -98,7 +101,7 @@ def get_feedback(
             "engagement_feedback": "No data",
         }
         
-    client = get_openai_client()
+    client = get_gemini_client()
     prompt = f"""You are an expert {q_type} interviewer. Evaluate this candidate answer fairly and constructively.
 
 Role: {job_role}
@@ -118,14 +121,16 @@ Return ONLY valid JSON:
 }}"""
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.3,
-            max_tokens=700,
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.3,
+                max_output_tokens=700,
+            ),
         )
-        return json.loads(response.choices[0].message.content)
+        return json.loads(response.text)
     except Exception as exc:
         return {"success": False, "message": str(exc)}
 
@@ -186,75 +191,61 @@ def get_interview_history(user_id: int) -> list[dict]:
 # -- Overall summary --
 
 def get_interview_summary(feedback: list[dict], job_role: str) -> dict:
-    """Generate a GPT-4o coaching summary from per-question feedback."""
+    """Generate a Gemini coaching summary from per-question feedback."""
     if not feedback:
         return {"overall_summary": "No feedback available.", "recommendations": [], "top_strength": ""}
         
-    client = get_openai_client()
-    feedback_text = "\n".join([
+    client = get_gemini_client()
+    feedback_text = "\n".join(
         f"Q{i+1}: Score {f.get('score', 0)}/10 - {f.get('strength', '')} | {f.get('improvement', '')}"
         for i, f in enumerate(feedback)
         if isinstance(f, dict)
-    ])
+    )
     
     prompt = f"""You are an interview coach. Based on the following per-question feedback for a {job_role} candidate, write:
-1. A 1-2 sentence overall performance summary
-2. Three concrete recommendations for improvement
-3. One key strength to build upon
+        1. A 1-2 sentence overall performance summary
+        2. Three concrete recommendations for improvement
+        3. One key strength to build upon
 
-Feedback summary:
-{feedback_text}
+        Feedback summary:
+        {feedback_text}
 
-Return ONLY valid JSON:
-{{
-    "overall_summary": "...",
-    "recommendations": ["...", "...", "..."],
-    "top_strength": "..."
-}}"""
+        Return ONLY valid JSON:
+        {{"overall_summary": "...",
+        "recommendations": ["...", "...", "..."],
+        "top_strength": "..."}}"""
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.4,
-            max_tokens=500,
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.4,
+                max_output_tokens=500,
+            ),
         )
-        return json.loads(response.choices[0].message.content)
+        return json.loads(response.text)
     except Exception as exc:
         return {"overall_summary": str(exc), "recommendations": [], "top_strength": ""}
 
 
-# -- Audio transcription (OpenAI Whisper) --
+# -- Audio transcription (Gemini multimodal) --
 
 def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
-    """Transcribe audio bytes using OpenAI Whisper."""
-    import tempfile
-    import os
-    
-    # Determine file extension from mime type
-    ext_map = {
-        "audio/wav": ".wav",
-        "audio/webm": ".webm",
-        "audio/ogg": ".ogg",
-        "audio/mp4": ".mp4",
-        "audio/mpeg": ".mp3",
-    }
-    ext = ext_map.get(mime_type, ".wav")
-    
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        tmp.write(audio_bytes)
-        tmp_path = tmp.name
-        
+    """
+    Transcribe audio bytes using Gemini's multimodal API.
+    Returns the transcription text or empty string on failure.
+    """
     try:
-        client = get_openai_client()
-        with open(tmp_path, "rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-            )
-        return transcript.text
+        client = get_gemini_client()
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[
+                genai_types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                "Transcribe this audio. Return only the spoken text, nothing else.",
+            ],
+        )
+        return response.text.strip() if response.text else ""
     except Exception:
         return ""
-    finally:
-        os.unlink(tmp_path)
